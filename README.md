@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Aivora AdAgent
 
 **An AI-powered marketing campaign generator using multiple AI agents.**
