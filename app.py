@@ -4,6 +4,7 @@ import textwrap
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 from google import genai
+from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="Aivora | AdAgent", page_icon="🚀", layout="wide")
 
@@ -25,41 +26,65 @@ with st.sidebar:
     st.write("🎯 Strategy Agent")
     st.write("📊 Optimization Agent")
 
+
 st.subheader("1. Describe your campaign")
 
 with st.form("campaign_form"):
-    product = st.text_input(
-        "Product or brand",
-        placeholder="e.g. EcoSip reusable water bottles"
-    )
-    description = st.text_area(
-        "What are you promoting?",
-        placeholder="Describe the product, its benefits and what makes it different."
+    request = st.text_area(
+        "What would you like AdAgent to help you market?",
+        placeholder=(
+            "Example: Promote my handmade jewellery business "
+            "on Instagram, launch my college fest, advertise a "
+            "food delivery app, promote a coaching service, or "
+            "create a campaign for a new product."
+        ),
+        height=130
     )
 
     col1, col2 = st.columns(2)
+
     with col1:
         audience = st.text_input(
-            "Target audience",
-            "College students aged 18–25"
+            "Target audience (optional)",
+            placeholder="e.g. college students, working professionals"
         )
+
         goal = st.selectbox(
             "Campaign goal",
-            ["Brand awareness", "Website traffic", "Sales",
-             "Product launch", "Engagement"]
+            [
+                "Brand awareness",
+                "Website traffic",
+                "Sales or enquiries",
+                "Product or service launch",
+                "Event registrations",
+                "App downloads",
+                "Engagement",
+                "Other"
+            ]
         )
+
     with col2:
         budget = st.number_input(
             "Total budget (₹)",
-            min_value=500,
+            min_value=0,
             max_value=10000000,
             value=5000,
             step=500
         )
+
         platforms = st.multiselect(
-            "Marketing channels",
-            ["Instagram", "YouTube", "LinkedIn", "Facebook"],
-            default=["Instagram", "YouTube"]
+            "Marketing channels (optional)",
+            [
+                "Instagram",
+                "YouTube",
+                "LinkedIn",
+                "Facebook",
+                "WhatsApp",
+                "Email",
+                "Website",
+                "Other"
+            ],
+            default=["Instagram"]
         )
 
     submitted = st.form_submit_button(
@@ -97,8 +122,9 @@ Give a useful response appropriate to your assigned agent role.
 
     interaction = client.interactions.create(
         model="gemini-3.8-flash",
-        input=prompt
-    )
+        input=prompt,
+        timeout=30
+    )   
 
     return interaction.output_text or "The agent returned an empty response."
 
@@ -159,77 +185,122 @@ def make_poster(product_name, tagline):
 
 
 if submitted:
-    if not product.strip() or not description.strip():
-        st.error("Enter your product name and description first.")
+    if not request.strip():
+        st.error(
+            "Describe what you want AdAgent to help you market."
+        )
     elif not api_key.strip():
         st.error(
             "Enter your Gemini API key in the sidebar to generate "
             "a real AI campaign."
         )
-    elif not platforms:
-        st.error("Select at least one marketing channel.")
     else:
+        audience_text = audience.strip() or "Not specified"
+        platform_text = ", ".join(platforms) if platforms else "Recommend suitable channels"
+
         context = f"""
-Product: {product}
-Description: {description}
-Target audience: {audience}
-Campaign goal: {goal}
-Budget in INR: {budget}
-Selected platforms: {", ".join(platforms)}
+USER'S MARKETING REQUEST:
+{request}
+
+CAMPAIGN GOAL:
+{goal}
+
+TARGET AUDIENCE:
+{audience_text}
+
+TOTAL BUDGET IN INR:
+₹{budget}
+
+PREFERRED MARKETING CHANNELS:
+{platform_text}
+
+IMPORTANT INSTRUCTIONS:
+- Adapt the campaign to the user's actual request.
+- Support products, services, businesses, events, apps,
+  personal brands, educational services and other legitimate
+  marketing needs.
+- Do not assume the request is about EcoSip or any particular
+  brand unless the user explicitly says so.
+- Do not invent product features, prices, discounts, testimonials,
+  certifications, performance results or business claims.
+- If important details are missing, state reasonable assumptions
+  clearly instead of presenting them as verified facts.
+- Make recommendations practical for the specified budget.
 """
 
         try:
-            client = genai.Client(api_key=api_key)
-
-            with st.spinner("Agent 1 is creating your campaign..."):
-                creative = ask_agent(
-                    client,
-                    "Creative Agent",
-                    "Create platform-specific ad headlines, captions, "
-                    "calls to action and a short poster tagline. "
-                    "Label each platform's content clearly.",
+            def run_agent(role, instructions):
+                agent_client = genai.Client(api_key=api_key)
+                return ask_agent(
+                    agent_client,
+                    role,
+                    instructions,
                     context
                 )
 
-            with st.spinner("Agent 2 is planning distribution..."):
-                strategy = ask_agent(
-                    client,
-                    "Strategy and Scheduling Agent",
-                    "Use the creative campaign as input. Recommend "
-                    "channel allocation, audience fit, a 7-day posting "
-                    "calendar with suggested local times, and a budget "
-                    "split totalling the supplied budget. Explain that "
-                    "timing suggestions are hypotheses, not measured "
-                    "audience peak times.",
-                    context + "\nCreative Agent output:\n" + creative
-                )
+            with st.spinner(
+                "All three AI agents are working simultaneously..."
+            ):
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    creative_future = executor.submit(
+                        run_agent,
+                        "Creative Agent",
+                        """
+                        Create a concise marketing campaign for the user's
+                        request. Include a campaign idea, three headlines,
+                        two captions, calls to action, and a poster
+                        headline and tagline. Adapt to the actual product,
+                        service, event, app or business. Never invent
+                        factual claims.
+                        """
+                    )
 
-            with st.spinner("Agent 3 is preparing optimization..."):
-                optimization = ask_agent(
-                    client,
-                    "Performance and Optimization Agent",
-                    "Prepare a measurement plan for impressions, clicks, "
-                    "CTR, engagement and comment sentiment. Give an "
-                    "example of how you would optimize a campaign. "
-                    "Clearly label all sample metrics as simulated; "
-                    "no actual campaign data is available yet.",
-                    context + "\nCreative output:\n" + creative
-                    + "\nStrategy output:\n" + strategy
-                )
+                    strategy_future = executor.submit(
+                        run_agent,
+                        "Marketing Strategy Agent",
+                        """
+                        Create a practical marketing plan with suitable
+                        channels, target audience, a seven-day posting
+                        calendar, budget allocation and three
+                        recommendations. Ensure the budget allocation
+                        matches the supplied budget. For zero budget,
+                        recommend free promotional methods. Treat
+                        suggested posting times as estimates.
+                        """
+                    )
+
+                    optimization_future = executor.submit(
+                        run_agent,
+                        "Performance and Optimization Agent",
+                        """
+                        Create a measurement plan with three relevant
+                        metrics, how to measure them, two improvement
+                        experiments and a weekly review plan. Adapt
+                        metrics to the campaign goal. Label example
+                        numbers as simulated. Do not claim access to
+                        real campaign data.
+                        """
+                    )
+
+                    creative = creative_future.result()
+                    strategy = strategy_future.result()
+                    optimization = optimization_future.result()
 
             st.session_state["campaign"] = {
-                "product": product,
+                "product": request,
                 "creative": creative,
                 "strategy": strategy,
                 "optimization": optimization,
                 "context": context
             }
-            st.success("Your three-agent campaign workflow completed!")
+
+            st.success(
+                "Your three-agent marketing campaign is ready!"
+            )
 
         except Exception as error:
             st.error("The AI request failed.")
             st.code(f"{type(error).__name__}: {error}")
-
 
 campaign = st.session_state.get("campaign")
 
@@ -331,31 +402,87 @@ if campaign:
             "industry-wide benchmarks."
         )
 
+    
     with tab4:
-        poster_path = "ecosip_poster.png"
+        st.subheader("Campaign Poster")
 
-        try:
-            with open(poster_path, "rb") as file:
-                poster = file.read()
+        campaign = st.session_state.get("campaign")
 
-            st.image(
-                poster,
-                caption="EcoSip promotional poster concept",
-                use_container_width=True
+        if not campaign:
+            st.info(
+                "Generate a campaign first to create its poster."
+            )
+        else:
+            poster_context = campaign.get("context", "")
+            creative_text = campaign.get("creative", "")
+
+            st.write(
+                "Create poster content tailored to your campaign."
             )
 
-            st.download_button(
-                "Download campaign poster (PNG)",
-                data=poster,
-                file_name="adagent_poster.png",
-                mime="image/png"
+            if st.button("✨ Generate Poster Content"):
+                if not api_key.strip():
+                    st.error("Enter your Gemini API key in the sidebar.")
+                else:
+                    try:
+                        client = genai.Client(api_key=api_key)
+
+                        with st.spinner(
+                            "Creating your poster content..."
+                        ):
+                            poster_content = ask_agent(
+                                client,
+                                "Marketing Poster Designer",
+                                """
+                                Design the content and visual layout
+                                for a promotional poster.
+
+                                Return:
+                                1. A short, attention-grabbing headline.
+                                2. A supporting tagline.
+                                3. Three short supporting points.
+                                4. A clear call to action.
+                                5. A visual concept, including suggested
+                                   colors, imagery and layout.
+
+                                Adapt everything to the user's actual
+                                campaign. Do not assume it is EcoSip.
+                                Never invent dates, prices, prizes,
+                                features or other factual details.
+                                Use placeholders for missing information.
+
+                                Return a polished, easy-to-read design
+                                brief. Do not claim this is an actual
+                                rendered image.
+                                """,
+                                poster_context
+                                + "\nCAMPAIGN CREATIVE:\n"
+                                + creative_text
+                            )
+
+                        st.session_state["poster_content"] = (
+                            poster_content
+                        )
+
+                    except Exception as error:
+                        st.error("Poster content generation failed.")
+                        st.code(
+                            f"{type(error).__name__}: {error}"
+                        )
+
+            poster_content = st.session_state.get(
+                "poster_content"
             )
 
-        except FileNotFoundError:
-            st.warning(
-                "Poster file not found. Place ecosip_poster.png "
-                "in the same folder as app.py."
-            )
+            if poster_content:
+                st.markdown(poster_content)
+
+                st.download_button(
+                    "Download poster content (.txt)",
+                    data=poster_content,
+                    file_name="adagent_poster_content.txt",
+                    mime="text/plain"
+                )
 
 st.divider()
 st.caption(
